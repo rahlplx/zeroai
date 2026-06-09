@@ -1,17 +1,87 @@
 # ZeroAI — Zero-Cost AI From Your Terminal
 
-> **Never pay for AI again.** Stack 10+ free providers. Smart routing. Auto-fallback. ~100M tokens/day for $0.
+> **Never pay for AI again.** Stack 10+ free providers. Smart routing. Auto-fallback. Transparent proxy for Claude Code/Codex/Cursor. ~100M tokens/day for $0.
 
-ZeroAI is a universal CLI + MCP server that gives you free access to the latest AI models — no credit card, no browser automation, no wasted tokens. It intelligently routes your requests to the best free provider, automatically falls back on failure, and stacks rate limits across providers for virtually unlimited capacity.
+ZeroAI is a universal CLI + MCP server + **transparent proxy** that gives you free access to the latest AI models — no credit card, no browser automation, no wasted tokens. It intelligently routes your requests to the best free provider, automatically falls back on failure, and stacks rate limits across providers for virtually unlimited capacity.
+
+## The Magic Trick: Transparent Proxy
+
+**ZeroAI runs a local proxy that makes AI tools think they're talking to their official APIs, while secretly routing everything through free providers. Zero official tokens consumed.**
+
+```
+Claude Code ──→ thinks it's api.anthropic.com ──→ localhost:2016 ──→ Gemini 2.5 Pro (free)
+Codex ────────→ thinks it's api.openai.com ──────→ localhost:2016 ──→ Groq Llama 70B (free)
+Cursor ───────→ thinks it's api.openai.com ──────→ localhost:2016 ──→ DeepSeek V3 (free)
+```
+
+Your AI tools see their own API format, their own model names, everything looks normal — but **not a single token hits the official APIs**. All traffic goes through ZeroAI's free provider stack.
+
+### Model Mapping (Automatic)
+
+When your tool asks for a model, ZeroAI silently swaps it to the best free equivalent:
+
+| Requested Model | ZeroAI Routes To | Why |
+|----------------|-----------------|-----|
+| `claude-sonnet-4` | Gemini 2.5 Pro | Best free reasoning/code |
+| `claude-3.5-sonnet` | Gemini 2.5 Pro | Best free coding |
+| `claude-3-haiku` | Groq Llama 70B | Ultra-fast, free |
+| `gpt-4o` | Gemini 2.5 Pro | Best free alternative |
+| `gpt-4o-mini` | Groq Llama 70B | Fast, free |
+| `o3` / `o3-mini` | DeepSeek R1 | Best free reasoner |
+| `gpt-3.5-turbo` | Groq Llama 8B | Ultra-fast, free |
+
+## Quick Start
+
+### Step 1: Start the Proxy
+
+```bash
+# Install
+npm install -g zeroai
+
+# Get free API keys (one-time)
+zeroai init
+
+# Start the transparent proxy
+zeroai proxy
+```
+
+### Step 2: Inject Environment Variables
+
+```bash
+# Print the export commands
+zeroai inject
+
+# Or set them directly:
+export ANTHROPIC_BASE_URL=http://localhost:2016/anthropic
+export ANTHROPIC_API_KEY=sk-zeroai-local
+export OPENAI_BASE_URL=http://localhost:2016/v1
+export OPENAI_API_KEY=sk-zeroai-local
+```
+
+### Step 3: Use Your Tools Normally
+
+```bash
+# Claude Code — will use free Gemini/Groq instead of Anthropic
+claude
+
+# Codex — will use free Gemini/Groq instead of OpenAI
+codex
+
+# Cursor — set base_url in settings to http://localhost:2016/v1
+
+# Any OpenAI-compatible tool — just point base_url to localhost:2016
+```
+
+**That's it. Your tools work exactly as before, but all API calls are free.**
 
 ## Why ZeroAI?
 
 | Problem | ZeroAI Solution |
 |---------|----------------|
-| AI APIs cost $30-600/mo | **$0 forever** — stacks 10 free providers |
-| Rate limits block you | **~100M tokens/day** by rotating providers |
+| Claude Code costs $20-100/mo | **$0** — proxy routes to free providers |
+| OpenAI API costs $30-600/mo | **$0** — transparent proxy intercepts all calls |
+| Rate limits block you | **~100M tokens/day** by rotating 10 providers |
 | One provider goes down | **Auto-fallback chain** — never stop working |
-| Don't know which model to use | **Smart routing** — picks best model per task |
 | Browser AI wastes tokens | **Direct API** — no headless browser needed |
 | Privacy concerns with cloud | **Ollama local** — unlimited, private fallback |
 
@@ -26,36 +96,82 @@ ZeroAI is a universal CLI + MCP server that gives you free access to the latest 
 | **OpenRouter** | 27+ free models (DeepSeek, Llama, Qwen) | 20 RPM / 50 RPD | [openrouter.ai](https://openrouter.ai) |
 | **DeepSeek** | DeepSeek V3, R1 | 5M free signup tokens | [platform.deepseek.com](https://platform.deepseek.com) |
 | **Cohere** | Command R+ (128K ctx) | 1,000 calls/month | [dashboard.cohere.com](https://dashboard.cohere.com) |
-| **HuggingFace** | 100+ community models | ~few hundred/hr | [huggingface.co](https://huggingface.co) |
-| **Cloudflare** | Llama, Mistral, Qwen on edge | 10K neurons/day | [dash.cloudflare.com](https://dash.cloudflare.com) |
 | **Ollama** | Any model, unlimited | Unlimited (your hardware) | [ollama.com](https://ollama.com) |
 
 **Combined free capacity: ~100M tokens/day**
 
-## Quick Start
+## CLI Commands
 
 ```bash
-# 1. Install
-npm install -g zeroai
-
-# 2. Setup (guides you through getting free API keys)
-zeroai init
-
-# 3. Chat with any free model
-zeroai chat "Explain quantum computing"
-
-# 4. Use a specific provider
-zeroai chat --provider groq --model llama-3.3-70b "Write a Python web scraper"
-
-# 5. Run as MCP server (for Claude Code, Cursor, etc.)
-zeroai serve
-
-# 6. Compare responses across free providers
-zeroai compare "What is the meaning of life?"
-
-# 7. Health check
-zeroai doctor
+zeroai init          # Setup wizard — get free API keys
+zeroai proxy         # Start transparent proxy for Claude Code/Codex/Cursor
+zeroai inject        # Print env vars to redirect tools to the proxy
+zeroai chat "Hello"  # Chat with best free model directly
+zeroai serve         # Run as MCP server
+zeroai models        # List available free models
+zeroai compare "Hi"  # Compare providers side-by-side
+zeroai doctor        # Health check your configuration
 ```
+
+## Transparent Proxy Setup
+
+### For Claude Code (Anthropic API)
+
+```bash
+# 1. Start proxy
+zeroai proxy
+
+# 2. Set environment variables
+export ANTHROPIC_BASE_URL=http://localhost:2016/anthropic
+export ANTHROPIC_API_KEY=sk-zeroai-local
+
+# 3. Use Claude Code normally — all calls go through free providers
+claude
+```
+
+### For Codex / OpenAI Tools
+
+```bash
+# 1. Start proxy
+zeroai proxy
+
+# 2. Set environment variables
+export OPENAI_BASE_URL=http://localhost:2016/v1
+export OPENAI_API_KEY=sk-zeroai-local
+
+# 3. Use Codex normally
+codex
+```
+
+### For Cursor / Continue / Any Tool
+
+In the tool's settings, configure:
+```
+base_url = http://localhost:2016/v1
+api_key  = sk-zeroai-local
+```
+
+### Persistent Setup (Add to ~/.bashrc or ~/.zshrc)
+
+```bash
+# ZeroAI Transparent Proxy — zero official tokens
+export ANTHROPIC_BASE_URL=http://localhost:2016/anthropic
+export ANTHROPIC_API_KEY=sk-zeroai-local
+export OPENAI_BASE_URL=http://localhost:2016/v1
+export OPENAI_API_KEY=sk-zeroai-local
+```
+
+### How It Works
+
+1. Your AI tool (Claude Code, Codex, etc.) sends a request to `localhost:2016`
+2. ZeroAI receives the request in Anthropic or OpenAI format
+3. It maps the requested model to the best free equivalent (e.g., `claude-sonnet-4` → `gemini-2.5-pro`)
+4. It converts the message format if needed (Anthropic ↔ OpenAI ↔ Gemini)
+5. It routes the request through the free provider fallback chain
+6. It converts the response back to the original format
+7. Your tool receives a perfectly formatted response — it never knows the difference
+
+**Supports streaming (SSE) for both Anthropic and OpenAI formats.**
 
 ## Smart Routing
 
@@ -108,7 +224,7 @@ Add to your MCP config:
 ## Environment Variables
 
 ```bash
-# All optional — only set the ones you want
+# Free provider API keys (all optional)
 GOOGLE_AI_API_KEY=        # Gemini (free @ aistudio.google.com)
 GROQ_API_KEY=             # Groq (free @ console.groq.com)
 MISTRAL_API_KEY=          # Mistral (free @ console.mistral.ai)
@@ -116,38 +232,9 @@ CEREBRAS_API_KEY=         # Cerebras (free @ cloud.cerebras.ai)
 OPENROUTER_API_KEY=       # OpenRouter (free @ openrouter.ai)
 DEEPSEEK_API_KEY=         # DeepSeek (free @ platform.deepseek.com)
 COHERE_API_KEY=           # Cohere (free @ dashboard.cohere.com)
-HUGGINGFACE_TOKEN=        # HuggingFace (free @ huggingface.co)
-CLOUDFLARE_ACCOUNT_ID=    # Cloudflare (free @ dash.cloudflare.com)
-```
-
-## Use with OpenAI SDK (Drop-In Replacement)
-
-Every provider except Gemini uses the OpenAI-compatible API format:
-
-```python
-from openai import OpenAI
-import os
-
-# Groq — fastest, free
-client = OpenAI(
-    base_url="https://api.groq.com/openai/v1",
-    api_key=os.environ["GROQ_API_KEY"],
-)
-response = client.chat.completions.create(
-    model="llama-3.3-70b-versatile",
-    messages=[{"role": "user", "content": "Hello!"}],
-)
-
-# Cerebras — ultra-fast, free
-client = OpenAI(base_url="https://api.cerebras.ai/v1", api_key=os.environ["CEREBRAS_API_KEY"])
-
-# Ollama — local, unlimited
-client = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
 ```
 
 ## Rate Limit Multiplication
-
-Stack multiple free providers and rotate between them:
 
 | Combined Stack | Effective Rate Limit | Total Daily Tokens |
 |---|---|---|
@@ -170,19 +257,28 @@ Stack multiple free providers and rotate between them:
 ## Architecture
 
 ```
-Your Terminal / Claude Code / Cursor
+Claude Code / Codex / Cursor / Any Tool
+            │
+    (thinks it's official API)
             │
             ▼
-    ┌──────────────┐
-    │   ZeroAI     │
-    │  Smart Router│
-    └──────┬───────┘
-           │
-    ┌──────┼──────┬───────┬───────┬───────┐
-    ▼      ▼      ▼       ▼       ▼       ▼
-Google  Groq  Mistral  Cerebras  ...  Ollama
-(1.5K   (14K   (1B tok  (1.5M    ...  (Unlimited
- RPD)    RPD)   /mo)     /day)         local)
+    ┌──────────────────┐
+    │  ZeroAI Proxy    │
+    │  localhost:2016  │
+    │                  │
+    │  • Anthropic API │  ← Claude Code talks here
+    │  • OpenAI API    │  ← Codex/Cursor talk here
+    │  • Model mapping │  ← claude-sonnet-4 → gemini-2.5-pro
+    │  • Format conv.  │  ← Anthropic ↔ OpenAI ↔ Gemini
+    │  • Auto-fallback │  ← provider fails? try next
+    │  • Streaming SSE │  ← real-time token streaming
+    └────────┬─────────┘
+             │
+    ┌────────┼──────┬───────┬───────┬───────┐
+    ▼        ▼      ▼       ▼       ▼       ▼
+ Google   Groq  Mistral  Cerebras  ...  Ollama
+ (1.5K    (14K   (1B tok  (1.5M    ...  (∞ local
+  RPD)     RPD)   /mo)     /day)         free)
 ```
 
 ## Important Notes
@@ -192,6 +288,7 @@ Google  Groq  Mistral  Cerebras  ...  Ollama
 3. **DeepSeek is based in China** — Consider data privacy implications.
 4. **Google free tier not available in EU/EEA** — Use VPN or other providers.
 5. **Stack multiple providers** — Never depend on a single free provider. Rotate for resilience.
+6. **Proxy is local only** — The proxy only listens on localhost. Your API keys never leave your machine.
 
 ## License
 

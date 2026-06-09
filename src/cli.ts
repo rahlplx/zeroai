@@ -20,7 +20,7 @@ const program = new Command();
 
 program
   .name('zeroai')
-  .description('0 Zero-cost AI access from your terminal — stacks 10+ free providers with smart routing')
+  .description('0 Zero-cost AI access — stacks 10+ free providers, transparent proxy for Claude Code/Codex/Cursor')
   .version('1.0.0');
 
 // ─── Init Command ────────────────────────────────────────────────────
@@ -174,6 +174,66 @@ program
   .action(async () => {
     // Import and run the MCP server
     await import('./mcp-server.js');
+  });
+
+// ─── Proxy Command (Transparent API Proxy) ────────────────────────────
+program
+  .command('proxy')
+  .description('Start transparent proxy — makes Claude Code/Codex/Cursor think they\'re using official APIs while routing through free providers')
+  .option('-p, --port <port>', 'Port to run proxy on', '2016')
+  .action(async (options: any) => {
+    const { startProxy } = await import('./proxy.js');
+    const port = parseInt(options.port, 10);
+    startProxy(port);
+  });
+
+// ─── Inject Command (Auto-configure environment variables) ────────────
+program
+  .command('inject')
+  .description('Print shell commands to redirect Claude Code/Codex/Cursor to ZeroAI proxy')
+  .option('-p, --port <port>', 'Proxy port (default: 2016)', '2016')
+  .option('-s, --shell <shell>', 'Shell type (bash, zsh, fish)', 'bash')
+  .action(async (options: any) => {
+    const port = options.port;
+
+    console.log(chalk.bold.cyan('\n🔧 ZeroAI Proxy — Environment Injection\n'));
+    console.log(chalk.gray('Run these commands in your terminal before launching your AI tool:\n'));
+
+    console.log(chalk.bold('📋 For Claude Code (Anthropic API):'));
+    console.log(chalk.green(`
+  export ANTHROPIC_BASE_URL=http://localhost:${port}/anthropic
+  export ANTHROPIC_API_KEY=sk-zeroai-local
+    `));
+
+    console.log(chalk.bold('📋 For Codex / OpenAI tools:'));
+    console.log(chalk.green(`
+  export OPENAI_BASE_URL=http://localhost:${port}/v1
+  export OPENAI_API_KEY=sk-zeroai-local
+    `));
+
+    console.log(chalk.bold('📋 For Cursor / Continue / any tool with base_url config:'));
+    console.log(chalk.green(`
+  # In the tool's settings, set:
+  base_url = http://localhost:${port}/v1
+  api_key  = sk-zeroai-local
+    `));
+
+    console.log(chalk.bold('📋 One-liner (all tools at once):'));
+    console.log(chalk.green(`
+  export ANTHROPIC_BASE_URL=http://localhost:${port}/anthropic ANTHROPIC_API_KEY=sk-zeroai-local OPENAI_BASE_URL=http://localhost:${port}/v1 OPENAI_API_KEY=sk-zeroai-local
+    `));
+
+    console.log(chalk.bold('📋 Persistent (add to ~/.bashrc or ~/.zshrc):'));
+    console.log(chalk.gray(`
+  # ZeroAI Transparent Proxy — zero official tokens
+  export ANTHROPIC_BASE_URL=http://localhost:${port}/anthropic
+  export ANTHROPIC_API_KEY=sk-zeroai-local
+  export OPENAI_BASE_URL=http://localhost:${port}/v1
+  export OPENAI_API_KEY=sk-zeroai-local
+    `));
+
+    console.log(chalk.yellow('⚠️  Make sure ZeroAI proxy is running first: zeroai proxy'));
+    console.log(chalk.gray(`\nThen just launch Claude Code / Codex / Cursor normally. They'll use free providers.`));
   });
 
 // ─── Doctor Command ──────────────────────────────────────────────────
