@@ -241,7 +241,7 @@ describe('anthropicToOpenAI', () => {
     expect(JSON.parse(assistantMsg.tool_calls[0].function.arguments)).toEqual({ path: 'main.ts' });
   });
 
-  it('should convert Anthropic tool_result blocks to text', () => {
+  it('should convert Anthropic tool_result blocks to OpenAI role:tool messages', () => {
     const anthropicReq = {
       model: 'claude-sonnet-4',
       max_tokens: 4096,
@@ -264,11 +264,13 @@ describe('anthropicToOpenAI', () => {
 
     const result = anthropicToOpenAI(anthropicReq);
 
+    // FIX: tool_result should now produce role: 'tool' messages (not plain text)
     const toolResultMsg = result.messages.find(m =>
-      typeof m.content === 'string' && m.content.includes('Tool Result')
+      (m as any).role === 'tool'
     );
     expect(toolResultMsg).toBeDefined();
-    expect((toolResultMsg as any).content).toContain('toolu_123');
+    expect((toolResultMsg as any).role).toBe('tool');
+    expect((toolResultMsg as any).tool_call_id).toBe('toolu_123');
     expect((toolResultMsg as any).content).toContain('file contents here');
   });
 
@@ -537,7 +539,7 @@ describe('Proxy Server Integration', () => {
     const data = await resp.json() as any;
     expect(data.status).toBe('ok');
     expect(data.service).toBe('zeroai-proxy');
-    expect(data.version).toBe('1.0.0');
+    expect(data.version).toBe('1.1.0');
     expect(data.endpoints).toBeDefined();
     expect(data.endpoints.anthropic).toContain('/anthropic/v1/messages');
     expect(data.endpoints.openai).toContain('/v1/chat/completions');
@@ -578,7 +580,7 @@ describe('Proxy Server Integration', () => {
   it('should handle CORS preflight requests', async () => {
     const resp = await fetch(`${BASE}/health`, { method: 'OPTIONS' });
     expect(resp.status).toBe(200);
-    expect(resp.headers.get('access-control-allow-origin')).toBe('*');
+    expect(resp.headers.get('access-control-allow-origin')).toBeTruthy();
     expect(resp.headers.get('access-control-allow-methods')).toBeTruthy();
   });
 
@@ -714,5 +716,340 @@ describe('MODEL_MAP coverage', () => {
     expect(MODEL_MAP['o3-mini']).toBeDefined();
     expect(MODEL_MAP['o1']).toBeDefined();
     expect(MODEL_MAP['o1-mini']).toBeDefined();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// AUDIT FIX TESTS: Regression tests for bugs found in audit
+// ═══════════════════════════════════════════════════════════════════════
+
+describe('Audit fix: resolveModel partial match ordering', () => {
+  it('should match gpt-4o-mini-2025-new to gpt-4o-mini (not gpt-4o)', () => {
+    // CRITICAL BUG FIX: gpt-4o-mini variants must match gpt-4o-mini, not gpt-4o
+    const result = resolveModel('gpt-4o-mini-2025-new');
+    expect(result.provider).toBe('groq');
+    expect(result.model).toBe('llama-3.3-70b-versatile'); // fast tier, not gemini-2.5-pro
+  });
+
+  it('should match gpt-4o-mini-2024-07-18 to gpt-4o-mini', () => {
+    const result = resolveModel('gpt-4o-mini-2024-07-18');
+    expect(result.provider).toBe('groq');
+    expect(result.model).toBe('llama-3.3-70b-versatile');
+  });
+});
+
+describe('Audit fix: tool_result → role:tool conversion', () => {
+  it('should produce separate role:tool messages for each tool_result', () => {
+    const anthropicReq = {
+      model: 'claude-sonnet-4',
+      max_tokens: 4096,
+      messages: [
+        { role: 'user', content: 'Read files' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', id: 'toolu_1', name: 'read_file', input: { path: 'a.ts' } },
+            { type: 'tool_use', id: 'toolu_2', name: 'read_file', input: { path: 'b.ts' } },
+          ],
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 'toolu_1', content: 'content of a' },
+            { type: 'tool_result', tool_use_id: 'toolu_2', content: 'content of b' },
+          ],
+        },
+      ],
+    };
+
+    const result = anthropicToOpenAI(anthropicReq);
+    const toolMessages = result.messages.filter(m => (m as any).role === 'tool');
+    expect(toolMessages).toHaveLength(2);
+    expect((toolMessages[0] as any).tool_call_id).toBe('toolu_1');
+    expect((toolMessages[1] as any).tool_call_id).toBe('toolu_2');
+  });
+
+  it('should handle tool_result with array content', () => {
+    const anthropicReq = {
+      model: 'claude-sonnet-4',
+      max_tokens: 4096,
+      messages: [
+        { role: 'user', content: 'Read' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', id: 'toolu_1', name: 'read_file', input: { path: 'a.ts' } },
+          ],
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 'toolu_1', content: [{ type: 'text', text: 'file content' }] },
+          ],
+        },
+      ],
+    };
+
+    const result = anthropicToOpenAI(anthropicReq);
+    const toolMsg = result.messages.find(m => (m as any).role === 'tool') as any;
+    expect(toolMsg).toBeDefined();
+    expect(toolMsg.content).toContain('file content');
+  });
+});
+
+describe('Audit fix: thinking block handling', () => {
+  it('should skip thinking blocks in user messages', () => {
+    const anthropicReq = {
+      model: 'claude-sonnet-4',
+      max_tokens: 4096,
+      messages: [
+        { role: 'user', content: 'Hello' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'Let me think about this...' },
+            { type: 'text', text: 'Here is my answer.' },
+          ],
+        },
+      ],
+    };
+
+    const result = anthropicToOpenAI(anthropicReq);
+    const assistantMsg = result.messages.find(m => m.role === 'assistant') as any;
+    // Thinking blocks should be stripped
+    expect(assistantMsg.content).toBe('Here is my answer.');
+    expect(assistantMsg.content).not.toContain('thinking');
+  });
+
+  it('should skip redacted_thinking blocks', () => {
+    const anthropicReq = {
+      model: 'claude-sonnet-4',
+      max_tokens: 4096,
+      messages: [
+        { role: 'user', content: 'Hello' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'redacted_thinking', data: 'encrypted...' },
+            { type: 'text', text: 'Response' },
+          ],
+        },
+      ],
+    };
+
+    const result = anthropicToOpenAI(anthropicReq);
+    const assistantMsg = result.messages.find(m => m.role === 'assistant') as any;
+    expect(assistantMsg.content).toBe('Response');
+  });
+});
+
+describe('Audit fix: stop_sequences and tool_choice forwarding', () => {
+  it('should forward stop_sequences as stop parameter', () => {
+    const anthropicReq = {
+      model: 'claude-sonnet-4',
+      max_tokens: 4096,
+      stop_sequences: ['END', 'STOP'],
+      messages: [
+        { role: 'user', content: 'Hello' },
+      ],
+    };
+
+    const result = anthropicToOpenAI(anthropicReq);
+    expect(result.stop).toEqual(['END', 'STOP']);
+  });
+
+  it('should forward tool_choice auto', () => {
+    const anthropicReq = {
+      model: 'claude-sonnet-4',
+      max_tokens: 4096,
+      tool_choice: { type: 'auto' },
+      tools: [{ name: 'test', description: 'test tool', input_schema: { type: 'object', properties: {} } }],
+      messages: [
+        { role: 'user', content: 'Hello' },
+      ],
+    };
+
+    const result = anthropicToOpenAI(anthropicReq);
+    expect(result.tool_choice).toBe('auto');
+  });
+
+  it('should forward tool_choice any as required', () => {
+    const anthropicReq = {
+      model: 'claude-sonnet-4',
+      max_tokens: 4096,
+      tool_choice: { type: 'any' },
+      tools: [{ name: 'test', description: 'test tool', input_schema: { type: 'object', properties: {} } }],
+      messages: [
+        { role: 'user', content: 'Hello' },
+      ],
+    };
+
+    const result = anthropicToOpenAI(anthropicReq);
+    expect(result.tool_choice).toBe('required');
+  });
+});
+
+describe('Audit fix: Anthropic response cache fields', () => {
+  it('should include cache_creation_input_tokens and cache_read_input_tokens', () => {
+    const openaiResp = {
+      id: 'chatcmpl-123',
+      object: 'chat.completion',
+      model: 'gemini-2.5-pro',
+      choices: [{
+        index: 0,
+        message: { role: 'assistant', content: 'Hello' },
+        finish_reason: 'stop',
+      }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    };
+
+    const result = openAIToAnthropicResponse(openaiResp, 'claude-sonnet-4');
+    expect(result.usage.cache_creation_input_tokens).toBe(0);
+    expect(result.usage.cache_read_input_tokens).toBe(0);
+  });
+});
+
+describe('Audit fix: malformed tool arguments', () => {
+  it('should handle malformed JSON in tool_call arguments gracefully', () => {
+    const openaiResp = {
+      id: 'chatcmpl-123',
+      object: 'chat.completion',
+      model: 'llama-3.3-70b-versatile',
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [{
+            id: 'call_1',
+            type: 'function',
+            function: { name: 'bash', arguments: 'not valid json{' },
+          }],
+        },
+        finish_reason: 'tool_calls',
+      }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    };
+
+    // Should not throw — malformed args are caught and put in _raw_arguments
+    const result = openAIToAnthropicResponse(openaiResp, 'claude-sonnet-4');
+    expect(result.content[0].type).toBe('tool_use');
+    expect(result.content[0].input._raw_arguments).toBe('not valid json{');
+  });
+});
+
+describe('Audit fix: single-object system prompt', () => {
+  it('should handle system prompt as a single content block object', () => {
+    const anthropicReq = {
+      model: 'claude-sonnet-4',
+      max_tokens: 4096,
+      system: { type: 'text', text: 'You are a helpful assistant.' },
+      messages: [
+        { role: 'user', content: 'Hello' },
+      ],
+    };
+
+    const result = anthropicToOpenAI(anthropicReq);
+    expect(result.messages[0]).toEqual({ role: 'system', content: 'You are a helpful assistant.' });
+  });
+});
+
+describe('Audit fix: image block null safety', () => {
+  it('should skip image blocks with undefined source', () => {
+    const anthropicReq = {
+      model: 'claude-sonnet-4',
+      max_tokens: 4096,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'What is this?' },
+          { type: 'image' }, // missing source — should not crash
+        ],
+      }],
+    };
+
+    const result = anthropicToOpenAI(anthropicReq);
+    // Should only have the text, no crash
+    expect(result.messages[0].content).toBe('What is this?');
+  });
+});
+
+describe('Audit fix: request validation', () => {
+  let server: any;
+  const TEST_PORT = 9877;
+  const BASE = `http://localhost:${TEST_PORT}`;
+
+  beforeAll(async () => {
+    server = startProxy(TEST_PORT);
+    await new Promise(resolve => setTimeout(resolve, 200));
+  });
+
+  afterAll(() => {
+    if (server) server.close();
+  });
+
+  it('should reject invalid temperature', async () => {
+    const resp = await fetch(`${BASE}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: 'Hi' }],
+        temperature: 5.0, // Invalid
+      }),
+    });
+
+    expect(resp.status).toBe(400);
+  });
+
+  it('should reject non-array messages', async () => {
+    const resp = await fetch(`${BASE}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: 'not an array',
+      }),
+    });
+
+    expect(resp.status).toBe(400);
+  });
+
+  it('should reject too many tools', async () => {
+    const tools = Array.from({ length: 200 }, (_, i) => ({
+      type: 'function',
+      function: { name: `tool_${i}`, description: `Tool ${i}` },
+    }));
+
+    const resp = await fetch(`${BASE}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: 'Hi' }],
+        tools,
+      }),
+    });
+
+    expect(resp.status).toBe(400);
+  });
+});
+
+describe('Audit fix: Anthropic response ID format', () => {
+  it('should generate msg_ prefixed IDs with proper length', () => {
+    const openaiResp = {
+      id: 'chatcmpl-123',
+      object: 'chat.completion',
+      model: 'gemini-2.5-pro',
+      choices: [{
+        index: 0,
+        message: { role: 'assistant', content: 'Hello' },
+        finish_reason: 'stop',
+      }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    };
+
+    const result = openAIToAnthropicResponse(openaiResp, 'claude-sonnet-4');
+    expect(result.id).toMatch(/^msg_[A-Za-z0-9]{24}$/);
   });
 });

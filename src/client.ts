@@ -138,8 +138,8 @@ async function callProvider(
 
   // OpenRouter specific headers
   if (provider.id === 'openrouter') {
-    headers['HTTP-Referer'] = 'https://free-ai-cli.dev';
-    headers['X-Title'] = 'Free AI CLI';
+    headers['HTTP-Referer'] = 'https://zeroai.dev';
+    headers['X-Title'] = 'ZeroAI';
   }
 
   const body = {
@@ -153,11 +153,12 @@ async function callProvider(
     method: 'POST',
     headers,
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(120_000),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    const error: any = new Error(`${provider.name} API error: ${response.status} ${errorText}`);
+    const error: any = new Error(`${provider.name} API error: ${response.status}`);
     error.status = response.status;
     throw error;
   }
@@ -188,7 +189,7 @@ async function callGemini(
   startTime: number,
 ): Promise<ChatResponse> {
   const apiKey = process.env[provider.apiKeyEnvVar]!;
-  const url = `${provider.baseURL}/models/${model.id}:generateContent?key=${apiKey}`;
+  const url = `${provider.baseURL}/models/${model.id}:generateContent`;
 
   // Convert messages to Gemini format
   const contents = messages
@@ -214,13 +215,16 @@ async function callGemini(
 
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey,
+    },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(120_000),
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    const error: any = new Error(`Gemini API error: ${response.status} ${errorText}`);
+    const error: any = new Error(`Gemini API error: ${response.status}`);
     error.status = response.status;
     throw error;
   }
@@ -271,11 +275,11 @@ async function callCohere(
       'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(120_000),
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    const error: any = new Error(`Cohere API error: ${response.status} ${errorText}`);
+    const error: any = new Error(`Cohere API error: ${response.status}`);
     error.status = response.status;
     throw error;
   }
@@ -319,11 +323,11 @@ async function callOllama(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(120_000),
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    const error: any = new Error(`Ollama error (is it running?): ${response.status} ${errorText}`);
+    const error: any = new Error(`Ollama error (is it running?): ${response.status}`);
     error.status = response.status;
     throw error;
   }

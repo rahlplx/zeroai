@@ -1,6 +1,6 @@
 {
   "name": "zeroai",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Zero-cost AI access from your terminal — stacks 10+ free providers, smart routing, auto-fallback, MCP server",
   "type": "module",
   "main": "dist/index.js",
